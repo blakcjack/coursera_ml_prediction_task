@@ -1,0 +1,108 @@
+---
+title: "Jhon Hopkins Prediction Assigment"
+author: "Suberlin Sinaga"
+date: "4/3/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+suppressPackageStartupMessages({
+  library(dplyr)
+  library(DataExplorer)
+  library(caret)
+})
+```
+
+## Importing & Splitting Data
+
+  Importing data is the first thing that we have to do to load the data into our workspace.
+
+```{r}
+df_training <- read.csv("dataset/pml-training.csv") %>% dplyr::select(-1) # select conflict with MASS
+df_testing <- read.csv("dataset/pml-testing.csv") %>% dplyr::select(-1) # select conflict with MASS
+```
+
+  Here we know that our data has training and final testing data set. It means that we have to split the training data in order to have validation data before final prediction.
+  
+```{r}
+#for reproducibility
+set.seed(123)
+index_train <- createDataPartition(y = df_training$classe, p = 0.7, list = FALSE)
+df_val <- df_training[-index_train, ]
+df_training <- df_training[index_train,]
+```
+  
+## Preprocessing
+
+  In preprocessing process, the first thing I would like to do is to check the missingness.
+  
+```{r}
+df_training %>% 
+  plot_missing()
+```
+  
+
+  As the plot suggest, we need to remove several variables that has NA more than 97%. These variables will not be useful for our analysis. I don't use knn Impute for the variables since the number of missing is too high.
+  
+```{r}
+# getting the missing variable
+mising <- sapply(df_training, function(a) {sum(is.na(a))/length(a)})
+mising <- mising[which(mising > 0.97)] %>% names()
+df_training <- df_training[, !names(df_training) %in% mising]
+
+df_training %>% 
+  plot_missing()
+```
+  
+  Now, we can process next to get near zero variables that might not useful for the model.
+  
+```{r}
+nzv <- nearZeroVar(df_training)
+
+df_training <- df_training[, -nzv]
+```
+  
+  After finishing the elimination of the variable in our training set, the next thing we can do is generating final check if the variable satisfies our needs.
+  
+```{r}
+str(df_training)
+```
+  
+  In this case, i will treat the data not as a time series, so i decide to exclude those variables : `user_name`, `raw_timestamp_part_1`, `raw_timestamp_part_2`, `cvtd_timestamp`. We also see that the classe variable is still in char. We need to change this for both training and validation set.
+  
+```{r}
+df_training <- df_training[, !names(df_training) %in% c("user_name", "raw_timestamp_part_1", "raw_timestamp_part_2", "cvtd_timestamp")]
+
+df_training$classe <- as.factor(df_training$classe)
+df_val$classe <- as.factor(df_val$classe)
+```
+  
+  Now, we are ready to go.
+  
+## Building Model
+
+  After choosing the covariates, now I will build the model. In model building. Here I will use random forest using 10 fold cross validation. I also use BoxCox transformation to ensure that there is no too skewed data distribution. To ensure that the algorithms can converge faster I will use scale and center. To ensure that the features are highly optimized, I used pca.
+  
+```{r}
+trControl <- trainControl(method = "cv")
+model <- train(classe ~ ., data = df_training, method = "rf", preProcess = c("scale", "center", "pca", "BoxCox"),
+               trControl = trControl)
+```
+  
+```{r}
+model
+```
+  
+  From the model that we build, we can see that it seems our model is quite good. We have Accuracy greater than 96% with kappa around 96% too.
+  
+## Model Testing
+
+  The next thing I would like to do is test the model prediction power. To shorten the process, I would like directly test the model for validation test since applying it to the training set will give us the accurace around the model has been printed out.
+  
+```{r}
+pred_val <- predict(model, df_val)
+confusionMatrix(pred_val, df_val$classe)
+```
+  
+  Magnificent. We can see that here in our validation set, we get quite high prediction accuracy around 98%. I also get positive prediction power around 97.8% and negative prediction power around 99%.
